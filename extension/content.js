@@ -9,12 +9,18 @@ function $el(tag,props) {
 }
 // Default config
 // These values may be overridden by values retrieved from server
-let config = {
+const config = {
   participants_selector: 'div[role="list"][aria-label="Participants"]',
+  participants_button_selector: 'button[aria-label="Show everyone"]',
   pulse_timeslice: 500,
   min_talk_time_to_show: 2000
 };
-let options = {};
+const options = {
+  "welcome_dismissed": false,
+  "open_on_start": false,
+  "export_on_exit": false,
+  "export_format": "json"
+};
 let data = {};
 let participants_list = null;
 let totaltalktime = 0;
@@ -123,8 +129,23 @@ function createContainer() {
     </div>
     <div class="talk-time-options-content">
       <h3>Options</h3>
-      <p style="font-style:italic;">No options available at this time</p>
-      <p class="talk-time-export-csv">Export CSV</p>
+      <div class="talk-time-options-checkbox">
+        <input type="checkbox" id="option_open_on_start" name="option_open_on_start" ${options.open_on_start ? "checked" : ""} />
+        <label for="option_open_on_start">Open the Participants Tab on call start</label>
+      </div>
+      <div>
+        <h3>Export</h3>
+        <div class="talk-time-options-checkbox">
+          <input type="checkbox" id="option_export_on_exit" name="option_export_on_exit" ${options.export_on_exit ? "checked" : ""} />
+          <label for="option_export_on_exit">Export on meeting close</label>
+        </div>
+        <label for="option_export_format">Export format:</label>
+        <select name="option_export_format" id="option_export_format">
+          <option value="json" ${options.export_format == "json" ? "selected": ""}>JSON</option>
+          <option value="csv" ${options.export_format == "csv" ? "selected": ""}>CSV</option>
+        </select>
+        <button class="talk-time-export">Export</button>
+      </div>
       <button class="talk-time-options-close">Close</button>
     </div>
     <div class="talk-time-header">
@@ -139,6 +160,36 @@ function createContainer() {
     <div class="talk-time-bottom"></div>
   `;
   document.body.appendChild(dom_container);
+  const openOnStartOption = dom_container.querySelector("#option_open_on_start");
+  if (openOnStartOption) {
+    openOnStartOption.addEventListener('click',()=>{ 
+      options.open_on_start = openOnStartOption.checked;
+      persistOptions();
+     });
+  } else {
+    console.error("failed to find the option open on start")
+  }
+  const exportOnExitOption = dom_container.querySelector("#option_export_on_exit");
+  if (exportOnExitOption) {
+    exportOnExitOption.addEventListener('click',()=>{ 
+      options.export_on_exit = exportOnExitOption.checked;
+      persistOptions();
+      refreshExportListener();
+     });
+  } else {
+    console.error("failed to find the option export on exit")
+  }
+  const exportFormatOption = dom_container.querySelector("#option_export_format");
+  if (exportFormatOption) {
+    exportFormatOption.addEventListener('change',()=>{ 
+      console.log("new value", exportFormatOption.value);
+      options.export_format = exportFormatOption.value;
+      persistOptions();
+     });
+  } else {
+    console.error("failed to find the option export format")
+  }
+  
   dom_table = dom_container.querySelector('table');
   dom_total = dom_container.querySelector('#talk-time-summary-total');
   let onclick=function(selector,f) {
@@ -152,12 +203,43 @@ function createContainer() {
     dom_container.classList.add('talk-time-options');
   });
   onclick('.talk-time-options-close',()=>{ dom_container.classList.remove("talk-time-options"); });
-  onclick('.talk-time-export-csv',()=>{ 
-    console.table(data);
-    const myJSON = JSON.stringify(data);
-    console.log(myJSON);
-    downloadBlob(myJSON, 'export.json', 'text/csv;charset=utf-8;');
-  });
+  onclick('.talk-time-export',exportToFile);
+}
+
+function refreshExportListener() {
+  if (options.export_on_exit) {
+    addEventListener("beforeunload", exportOnExit, { capture: true });
+  } else {
+    removeEventListener("beforeunload", exportOnExit, {
+      capture: true,
+    });
+  }
+}
+
+function exportOnExit() {
+  if (Object.values(data).length === 0) {
+    // there is nothing to export.
+    return;
+  }
+  exportToFile();
+}
+
+function exportToFile() { 
+  const format = options.export_format;
+  let file = "";
+  switch (format) {
+    case 'csv': 
+      file += "name,total\n";
+      Object.values(data).forEach(participant => file += `${participant.name},${participant.total}\n`);
+    break;
+    case 'json': 
+    default:
+      file = JSON.stringify(Object.values(data).map(participant => ({name: participant.name, total: participant.total})));
+    break;
+  }
+  const filename = `talktime-export-${new Date().toISOString()}.${format}`;
+  downloadBlob(file,filename, `text/${format};charset=utf-8;`);
+  console.log(`Exported talk time to ${filename}`, file);
 }
 
 // Create the group rendering table
@@ -467,6 +549,14 @@ let observerConfig = {
   subtree: true,
 };
 let attached = false;
+function openParticipantsPanel() {
+  const button = document.querySelector(config.participants_button_selector);
+  if (!button && !attached) {
+    setTimeout(openParticipantsPanel, 1000); // retry every second until the panel is attached
+    return;
+  }
+  button.click();
+}
 function attach() {
   if (attached) {
     if (!participants_list || !participants_list.parentNode) {
@@ -532,13 +622,11 @@ function welcome() {
 
 // Get options
 chrome.storage.local.get(['options'],function(storage) {
-  options = storage.options;
-  if (!options) {
-    options = {
-      "welcome_dismissed": false
-    };
-    chrome.storage.local.set({"options":options});
+  // Copy the storage options over the defaults to persist new defaults.
+  for (k in storage.options) {
+       options[k] = storage.options[k];
   }
+  persistOptions();
   if (!options.welcome_dismissed) {
     addEventListener('DOMContentLoaded',welcome);
   }
@@ -551,8 +639,16 @@ chrome.storage.local.get(['options'],function(storage) {
   //   }
   // });
 
+  if (options.open_on_start) {
+    openParticipantsPanel();
+  }
+  refreshExportListener();
   setInterval(attach,1000);
 });
+
+function persistOptions() {
+  chrome.storage.local.set({"options":options});
+}
 
 function downloadBlob(content, filename, contentType) {
   // Create a blob

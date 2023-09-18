@@ -79,6 +79,11 @@
     background-color:white;
     padding:5px;
 }
+.talk-time-options-checkbox {
+    display: flex;
+    align-items: center;
+}
+
 #talk-time-container.talk-time-options .talk-time-options-content {
     display:block;
 }
