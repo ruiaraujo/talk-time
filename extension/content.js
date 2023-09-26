@@ -23,6 +23,7 @@ const options = {
 };
 let data = {};
 let participants_list = null;
+let meetingName = "";
 let totaltalktime = 0;
 let groups = {
   "a":{ "participants":{} },
@@ -237,7 +238,7 @@ function exportToFile() {
       file = JSON.stringify(Object.values(data).map(participant => ({name: participant.name, total: participant.total})));
     break;
   }
-  const filename = `talktime-export-${new Date().toISOString()}.${format}`;
+  const filename = `talktime-export[${meetingName}]-${new Date().toISOString()}.${format}`;
   downloadBlob(file,filename, `text/${format};charset=utf-8;`);
   console.log(`Exported talk time to ${filename}`, file);
 }
@@ -571,6 +572,7 @@ function attach() {
     //console.log( document.querySelector(config.participants_selector) );
 
     participants_list = document.querySelector(config.participants_selector);
+    meetingName = document.querySelector("div[data-meeting-title]")?.getAttribute("data-meeting-title") || ""
     if (participants_list) {
       observer.observe( participants_list, observerConfig );
       if (dom_container) {
